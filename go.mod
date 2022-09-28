@@ -1,6 +1,7 @@
 module github.com/ribasushi/fil-fip36-vote-tally
 
-go 1.18
+// append-capable Binary.Bigendian, could reimplement but too lazy
+go 1.19
 
 replace github.com/filecoin-project/filecoin-ffi => github.com/filecoin-project/ffi-stub v0.3.1-0.20220531143624-1d167a7a6263
 
@@ -8,6 +9,7 @@ require (
 	github.com/filecoin-project/go-address v0.0.6
 	github.com/filecoin-project/go-state-types v0.1.10
 	github.com/filecoin-project/lotus v1.16.1
+	github.com/georgysavva/scany v1.2.0
 	github.com/ipfs/go-block-format v0.0.3
 	github.com/ipfs/go-cid v0.1.0
 	github.com/ipfs/go-datastore v0.5.1

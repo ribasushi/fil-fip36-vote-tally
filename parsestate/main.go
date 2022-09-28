@@ -27,7 +27,6 @@ import (
 
 	ipldcbor "github.com/ipfs/go-ipld-cbor"
 
-	_ "github.com/mattn/go-sqlite3"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/xerrors"
 )

@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	_ "github.com/mattn/go-sqlite3"
 	"golang.org/x/xerrors"
 )
 
