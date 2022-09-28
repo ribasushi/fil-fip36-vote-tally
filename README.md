@@ -3,15 +3,23 @@ fil-fip36-vote-tally
 
 The code in this repository generates a reproducible dump of all [poll-relevant state](https://filpoll.io/poll/16) as of the poll-epoch for [FIP36](https://github.com/filecoin-project/FIPs/blob/master/FIPS/fip-0036.md) ([`2162760`](https://filscan.io/tipset/chain?height=2162760)).
 
-The generated SQLite database contains all Deals, all SpActors, all MultiSigs, and all plain Accounts
-which should be sufficient to tally the [votes as present in the live log](https://api.filpoll.io/api/polls/16/view-votes).
+### Data summary
+
+The generated SQLite database contains all Deals, all SpActors, all MultiSigs, and all plain Accounts, which in turn should be sufficient to tally [the votes, as present in the live log](https://api.filpoll.io/api/polls/16/view-votes).
+
+The current version of this code produces a single-file standard SQLite database with SHA2-256 of `0d51f09d5cc015fae2838ca90dbe7800beb0968b90eb4da2ca2185742b548f49`. The process takes about ~8 minutes. You can download the (compressed) current result at: [ipfs://bafybeib3jcbsqmtjxcrafkgpldrsr3w4ubu4t6aqb5gyjhnpwhfd5r6viu/filstate_2162760.sqlite.zst](https://bafybeib3jcbsqmtjxcrafkgpldrsr3w4ubu4t6aqb5gyjhnpwhfd5r6viu.ipfs.w3s.link/filstate_2162760.sqlite.zst) . The count of processed entries is:
+
+```
+Processed      deals: 7548232     accounts: 1306006     msigs: 18449     providers: 589458
+```
 
 **No filtering** has been applied whatsoever: you will need to exclude disqualified/inactive entries yourself. The only modification was dropping the `f0` prefix from all ID addresses and representing them as actual integers, in order to save significant amounts of space. For the same reason the database contains no indexes: it is strongly recommended to add some before proceeding.
 
-You can download the (compressed) result at: [ipfs://bafybeifo6tnb46wgedl4ofmk6w22pjk6kub5dzsx2nvhkav4xbfiym6mn4/filstate_2162760.sqlite.zst](https://bafybeifo6tnb46wgedl4ofmk6w22pjk6kub5dzsx2nvhkav4xbfiym6mn4.ipfs.w3s.link/filstate_2162760.sqlite.zst)
+### Reproducibility
 
-All you need in order to reproduce this result is a chain+state export containing the height in question. Below
-you can see the log of such a run, and a ballpark idea how much time and space you will need.
+All you need in order to reproduce this result is a chain+state export containing the height in question. Below you can see the log of such a run, and a ballpark idea how much time and space you will need.
+
+<details><summary>Example double-run of an earlier version at https://github.com/ribasushi/fil-fip36-vote-tally/commit/8ba5208ffd</summary>
 
 ```
 ~/fil-fip36-vote-tally$ ls -alh data/ ; for i in 1 2 ; do time go run ./parsestate/ ; ls -alh data/filstate_2162760.sqlite; sha256sum data/filstate_2162760.sqlite ; done ; ls -alh data/
@@ -56,6 +64,7 @@ drwxrwxr-x 3 ubuntu ubuntu   26 Sep 27 11:10 ..
 -rw-rw-r-- 1 ubuntu ubuntu 1.9G Sep 28 01:08 minimal_finality_stateroots_2163120_2022-09-15_00-00-00.car.idx
 ```
 
+</details>
 
 
 ## Lead Maintainer

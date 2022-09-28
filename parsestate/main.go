@@ -12,6 +12,7 @@ import (
 
 	filaddr "github.com/filecoin-project/go-address"
 	filabi "github.com/filecoin-project/go-state-types/abi"
+	filbig "github.com/filecoin-project/go-state-types/big"
 
 	lbi "github.com/filecoin-project/lotus/chain/actors/builtin"
 	lbiaccount "github.com/filecoin-project/lotus/chain/actors/builtin/account"
@@ -162,7 +163,20 @@ func parseActors(ctx context.Context, dict procDictionary, sm *lchstmgr.StateMan
 				return err
 			}
 
-			pc, _, err := ps.MinerPower(addr)
+			pc, eligibleToMine, err := ps.MinerPower(addr)
+			if err != nil {
+				return err
+			}
+			if !eligibleToMine {
+				pc.RawBytePower = filbig.Zero()
+				pc.QualityAdjPower = filbig.Zero()
+			}
+
+			bal, err := p.AvailableBalance(act.Balance)
+			if err != nil {
+				return err
+			}
+			vest, err := p.VestedFunds(ts.Height())
 			if err != nil {
 				return err
 			}
@@ -174,6 +188,7 @@ func parseActors(ctx context.Context, dict procDictionary, sm *lchstmgr.StateMan
 				mustAddrID(pi.Worker),
 				pc.RawBytePower.String(),
 				pc.QualityAdjPower.String(),
+				filbig.Add(bal, vest).String(),
 			)
 			return err
 
@@ -183,7 +198,10 @@ func parseActors(ctx context.Context, dict procDictionary, sm *lchstmgr.StateMan
 			if err != nil {
 				return err
 			}
-			pa, _ := w.PubkeyAddress()
+			pa, err := w.PubkeyAddress()
+			if err != nil {
+				return err
+			}
 
 			atomic.AddInt32(tot["accounts"], 1)
 			_, err = dict[procAddAccount].Exec(
@@ -215,11 +233,17 @@ func parseActors(ctx context.Context, dict procDictionary, sm *lchstmgr.StateMan
 				}
 			}
 
+			// msig balance needs calculating for epoch in question
+			lb, err := ms.LockedBalance(ts.Height())
+			if err != nil {
+				return err
+			}
+
 			atomic.AddInt32(tot["msigs"], 1)
 			_, err = dict[procAddMsig].Exec(
 				msID,
 				tr,
-				act.Balance.String(),
+				filbig.Sub(act.Balance, lb).String(),
 			)
 			return err
 

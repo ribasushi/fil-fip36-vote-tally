@@ -107,7 +107,8 @@ func prepDb(workDir string) (procDictionary, func(string) error, error) {
 			owner_id INTEGER NOT NULL,
 			worker_id INTEGER NOT NULL,
 			power_raw TEXT NOT NULL,
-			power_qa TEXT NOT NULL
+			power_qa TEXT NOT NULL,
+			balance TEXT NOT NULL
 		)
 		`,
 		`
@@ -154,9 +155,9 @@ func prepDb(workDir string) (procDictionary, func(string) error, error) {
 	if dict[procAddProvider], err = db.Prepare(
 		`
 		INSERT INTO providers (
-			provider_id, owner_id, worker_id, power_raw, power_qa
+			provider_id, owner_id, worker_id, power_raw, power_qa, balance
 		) VALUES (
-			$1, $2, $3, $4, $5
+			$1, $2, $3, $4, $5, $6
 		)
 		`,
 	); err != nil {
