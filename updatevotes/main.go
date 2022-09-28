@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"sort"
@@ -56,9 +57,9 @@ func updateVotesInDB(ctx context.Context, dbFn string, ballotURL string) error {
 	if _, err := db.Exec(
 		`
 		CREATE TABLE IF NOT EXISTS votes (
-			account_id INTEGER NOT NULL UNIQUE,
+			actor_id INTEGER NOT NULL UNIQUE,
 			does_accept BOOL NOT NULL,
-			vote_received DATETIME NOT NULL
+			vote_received DATETIME NULL
 		)
 		`,
 	); err != nil {
@@ -149,7 +150,7 @@ func updateVotesInDB(ctx context.Context, dbFn string, ballotURL string) error {
 	insertVote, err := db.Prepare(
 		`
 		INSERT INTO votes
-			( account_id, does_accept, vote_received )
+			( actor_id, does_accept, vote_received )
 		VALUES ( $1, $2, $3 )
 		`,
 	)
@@ -175,7 +176,175 @@ func updateVotesInDB(ctx context.Context, dbFn string, ballotURL string) error {
 		}
 	}
 
+	// give all the msigs a "vote" as well, based on their having-voted parts
+	// do it recursively, because why not :)
+	for {
+		res, err := db.Exec(
+			`
+			INSERT INTO votes
+				( actor_id, does_accept )
+			SELECT ma.msig_id, v.does_accept
+				FROM votes v
+				JOIN msig_actors ma USING ( actor_id )
+				JOIN msigs m USING ( msig_id )
+			WHERE
+				ma.msig_id NOT IN ( SELECT actor_id FROM votes )
+					AND
+				ma.msig_id != 1858410 -- ignore the Fil+ LDN msig
+			GROUP BY ma.msig_id, m.threshold, v.does_accept
+			HAVING COUNT(*) >= m.threshold
+			`,
+		)
+		if err != nil {
+			return err
+		}
+
+		ra, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+
+		if ra == 0 {
+			break
+		}
+	}
+
+	// now that we have all the signing actors vote: add the SPs as actors on their own too
+	// When there is a conflict, owner trumps worker
+	// https://filecoinproject.slack.com/archives/C01EU76LPCJ/p1663721692909119
+	if _, err := db.Exec(
+		`
+		WITH sp_votes AS (
+			SELECT
+					p.provider_id,
+					COALESCE(
+						( SELECT does_accept FROM votes v WHERE v.actor_id = p.owner_id ),
+						( SELECT does_accept FROM votes v WHERE v.actor_id = p.worker_id )
+					) AS does_accept
+				FROM providers p
+			)
+		INSERT INTO votes
+			( actor_id, does_accept )
+		SELECT provider_id, does_accept FROM sp_votes WHERE does_accept IS NOT NULL
+		`,
+	); err != nil {
+		return err
+	}
+
 	log.Printf("Processed %d ACCEPT and %d REJECT votes\n", acceptCount, rejectCount)
+
+	type prelimRes struct {
+		Type       string
+		Weight     float64
+		DoesAccept *bool
+	}
+
+	pr := make([]prelimRes, 0, 8)
+
+	if err := sqlscan.Select(
+		ctx,
+		db,
+		&pr,
+		`
+		SELECT "BalancesNfil" type, SUM(bal) weight, does_accept FROM (
+			SELECT SUM( CAST( balance AS DOUBLE ) / 1000000000 ) bal, does_accept
+				FROM providers p
+				LEFT JOIN votes v ON p.provider_id = v.actor_id
+			GROUP BY does_accept
+
+				UNION ALL
+
+			SELECT SUM( CAST( balance AS DOUBLE ) / 1000000000 ) bal, does_accept
+				FROM accounts a
+				LEFT JOIN votes v ON a.account_id = v.actor_id
+			GROUP BY does_accept
+
+				UNION ALL
+
+			SELECT SUM( CAST( balance AS DOUBLE ) / 1000000000 ) bal, does_accept
+				FROM msigs m
+				LEFT JOIN votes v ON m.msig_id = v.actor_id
+			GROUP BY does_accept
+		) GROUP BY does_accept
+
+			UNION ALL
+
+		SELECT "DealBytesProvider" type, SUM( piece_size ) weight, does_accept
+			FROM deals d
+			LEFT JOIN votes v ON d.provider_id = v.actor_id
+		WHERE
+			d.sector_activation_epoch IS NOT NULL
+				AND
+			d.deal_slash_epoch IS NULL
+				AND
+			d.end_epoch > 2162760
+		GROUP BY does_accept
+
+			UNION ALL
+
+		SELECT "DealBytesClient" type, SUM( piece_size ) weight, does_accept
+			FROM deals d
+			LEFT JOIN votes v ON d.client_id = v.actor_id
+		WHERE
+			d.sector_activation_epoch IS NOT NULL
+				AND
+			d.deal_slash_epoch IS NULL
+				AND
+			d.end_epoch > 2162760
+		GROUP BY does_accept
+
+			UNION ALL
+
+		SELECT "SpRawBytesMiB" type, SUM( CAST( power_raw AS BIGINT ) >> 20 ) weight, does_accept
+			FROM providers p
+			LEFT JOIN votes v ON p.provider_id = v.actor_id
+		GROUP BY does_accept
+		`,
+	); err != nil {
+		return err
+	}
+
+	type tslice struct {
+		didVote    bool
+		doesAccept bool
+	}
+
+	prelimTally := make(map[string]map[tslice]float64, 4)
+	for _, p := range pr {
+
+		t, seen := prelimTally[p.Type]
+		if !seen {
+			t = make(map[tslice]float64, 3)
+			prelimTally[p.Type] = t
+		}
+
+		ts := tslice{
+			didVote: (p.DoesAccept != nil),
+		}
+		if ts.didVote {
+			ts.doesAccept = *p.DoesAccept
+		}
+
+		t[ts] = p.Weight
+	}
+
+	for g, t := range prelimTally {
+		tot := t[tslice{didVote: false}] + t[tslice{didVote: true, doesAccept: false}] + t[tslice{didVote: true, doesAccept: true}]
+		totVoted := t[tslice{didVote: true, doesAccept: false}] + t[tslice{didVote: true, doesAccept: true}]
+
+		fmt.Printf(`
+  Group: %s
+Abstain: % 3.1f%% % 20.0f
+    Yea: % 3.1f%% % 20.0f
+    Nay: % 3.1f%% % 20.0f
+
+`,
+			g,
+			100*t[tslice{didVote: false}]/tot, t[tslice{didVote: false}],
+			100*t[tslice{didVote: true, doesAccept: true}]/totVoted, t[tslice{didVote: true, doesAccept: true}],
+			100*t[tslice{didVote: true, doesAccept: false}]/totVoted, t[tslice{didVote: true, doesAccept: false}],
+		)
+	}
 
 	return nil
 }
