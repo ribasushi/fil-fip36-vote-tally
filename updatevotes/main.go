@@ -5,9 +5,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -25,7 +26,8 @@ type ballot struct {
 }
 
 const (
-	ballotSource = `https://api.filpoll.io/api/polls/16/view-votes`
+	// ballotSource = `https://api.filpoll.io/api/polls/16/view-votes`
+	ballotSource = `https://w3s.link/ipfs/bafybeietprvjsf47sqs2gh7bfkanjbf3nig56jibqfgrijjqxiirgmg3we/fil_fip36_poll_ballots_obtained_morning_of_2022-09-29.json`
 	dbFn         = `data/filstate_2162760.sqlite`
 )
 
@@ -37,7 +39,7 @@ func main() {
 	}
 }
 
-func updateVotesInDB(ctx context.Context, dbFn string, ballotURL string) error {
+func updateVotesInDB(ctx context.Context, dbFn string, ballotSrc string) error {
 
 	db, err := sql.Open(
 		"sqlite3", dbFn+"?"+strings.Join([]string{
@@ -83,23 +85,38 @@ func updateVotesInDB(ctx context.Context, dbFn string, ballotURL string) error {
 		acctLookup[a.AccountAddress] = a.AccountID
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", ballotURL, nil)
-	if err != nil {
-		return err
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close() //nolint:errcheck
+	var ballotRdr io.ReadCloser
+	defer func() {
+		if ballotRdr != nil {
+			ballotRdr.Close() //nolint:errcheck
+		}
+	}()
 
-	if resp.StatusCode != http.StatusOK {
-		return xerrors.Errorf("non-200 response: %d", resp.StatusCode)
+	if strings.HasPrefix(ballotSrc, "http://") || strings.HasPrefix(ballotSrc, "https://") {
+		req, err := http.NewRequestWithContext(ctx, "GET", ballotSrc, nil)
+		if err != nil {
+			return err
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return err
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return xerrors.Errorf("non-200 response: %d", resp.StatusCode)
+		}
+
+		ballotRdr = resp.Body
+	} else {
+		ballotRdr, err = os.Open(ballotSrc)
+		if err != nil {
+			return xerrors.Errorf("unable to open %s as plain file: %w", ballotSrc, err)
+		}
 	}
 
 	ballots := make([]ballot, 0, 1<<12)
-	if err := json.NewDecoder(resp.Body).Decode(&ballots); err != nil {
-		return xerrors.Errorf("unexpected error parsing data json %s: %w", ballotURL, err)
+	if err := json.NewDecoder(ballotRdr).Decode(&ballots); err != nil {
+		return xerrors.Errorf("unexpected error parsing data json %s: %w", ballotSrc, err)
 	}
 
 	type vote struct {
@@ -241,6 +258,8 @@ func updateVotesInDB(ctx context.Context, dbFn string, ballotURL string) error {
 
 	pr := make([]prelimRes, 0, 8)
 
+	log.Println("Calculating preliminary results ( takes about a minute )")
+
 	if err := sqlscan.Select(
 		ctx,
 		db,
@@ -332,7 +351,8 @@ func updateVotesInDB(ctx context.Context, dbFn string, ballotURL string) error {
 		tot := t[tslice{didVote: false}] + t[tslice{didVote: true, doesAccept: false}] + t[tslice{didVote: true, doesAccept: true}]
 		totVoted := t[tslice{didVote: true, doesAccept: false}] + t[tslice{didVote: true, doesAccept: true}]
 
-		fmt.Printf(`
+		log.Printf(`
+
   Group: %s
 Abstain: % 3.1f%% % 20.0f
     Yea: % 3.1f%% % 20.0f

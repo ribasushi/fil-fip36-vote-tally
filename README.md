@@ -15,6 +15,47 @@ Processed      deals: 7548232     accounts: 1306006     msigs: 18449     provide
 
 **No filtering** has been applied whatsoever: you will need to exclude disqualified/inactive entries yourself. The only modification was dropping the `f0` prefix from all ID addresses and representing them as actual integers, in order to save significant amounts of space. For the same reason the database contains no indexes: it is strongly recommended to add some before proceeding.
 
+### Preliminary poll results
+
+Having a database makes result polling really easy: [entire logic fits on a single page](https://github.com/ribasushi/fil-fip36-vote-tally/blob/b0833c04132/updatevotes/main.go#L249-L301)
+
+<details><summary>Preliminary unofficial **NOT AUDITED** results of FilPoll 16</summary>
+
+```
+$ go run ./updatevotes/
+2022/09/29 11:20:58 ignoring ballot {49 t1giru42mia2x27svolr3n7vth7byb77eshpc77iq 2022-09-28 18:12:09.179 +0000 UTC}: unknown robust address
+2022/09/29 11:20:59 Processed 715 ACCEPT and 566 REJECT votes
+2022/09/29 11:20:59 Calculating preliminary results ( takes about a minute )
+2022/09/29 11:22:00
+
+  Group: BalancesNfil
+Abstain:  97.7%   587232862540689920
+    Yea:  65.0%     8895619646577080
+    Nay:  35.0%     4789430246299900
+
+2022/09/29 11:22:00
+
+  Group: DealBytesProvider
+Abstain:  18.6%    39738054375265792
+    Yea:  16.9%    29314317179453952
+    Nay:  83.1%   144290514343871232
+
+2022/09/29 11:22:00
+
+  Group: DealBytesClient
+Abstain:  62.7%   133795964267689216
+    Yea:  19.2%    15266925616562176
+    Nay:  80.8%    64279996014339584
+
+2022/09/29 11:22:00
+
+  Group: SpRawBytesMiB
+Abstain:  63.6%       11776224067584
+    Yea:  64.9%        4378047905792
+    Nay:  35.1%        2369927970816
+```
+</details>
+
 ### Reproducibility
 
 All you need in order to reproduce this result is a chain+state export containing the height in question. Below you can see the log of such a run, and a ballpark idea how much time and space you will need.
